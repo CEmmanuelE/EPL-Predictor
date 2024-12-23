@@ -1,0 +1,43 @@
+import pandas as pd
+import os
+
+# Define the folder where your Excel files are stored
+folder_path = "/Users/emmanuel/Downloads/Final Dissertation/EPL_Seasons" 
+
+# Create an empty list to store data from all seasons
+all_seasons_data = []
+
+# Loop through all Excel files in the folder
+for file_name in os.listdir(folder_path):
+    if file_name.endswith(".xlsx"):
+        file_path = os.path.join(folder_path, file_name)
+        season_data = pd.read_excel(file_path, engine='openpyxl')
+        all_seasons_data.append(season_data)
+    elif file_name.endswith(".xls"):
+        file_path = os.path.join(folder_path, file_name)
+        season_data = pd.read_excel(file_path, engine='xlrd')
+        all_seasons_data.append(season_data)
+
+# Concatenate all the DataFrames into a single DataFrame
+combined_data = pd.concat(all_seasons_data, ignore_index=True)
+
+# Convert 'Date' to datetime and sort by it
+combined_data['Date'] = pd.to_datetime(combined_data['Date'], errors='coerce')
+combined_data = combined_data.sort_values(by='Date')
+
+# Feature Engineering: Goal Difference
+combined_data['GoalDifference'] = combined_data['FTHG'] - combined_data['FTAG']
+
+# Points for Home and Away Team
+combined_data['HomeTeamPoints'] = combined_data.apply(lambda row: 3 if row['FTR'] == 'H' else (1 if row['FTR'] == 'D' else 0), axis=1)
+combined_data['AwayTeamPoints'] = combined_data.apply(lambda row: 3 if row['FTR'] == 'A' else (1 if row['FTR'] == 'D' else 0), axis=1)
+
+# Rolling Average Form (last 5 matches) for both home and away teams
+combined_data['HomeTeamForm'] = combined_data.groupby('HomeTeam')['HomeTeamPoints'].rolling(window=5, min_periods=1).mean().reset_index(0, drop=True)
+combined_data['AwayTeamForm'] = combined_data.groupby('AwayTeam')['AwayTeamPoints'].rolling(window=5, min_periods=1).mean().reset_index(0, drop=True)
+
+# Save the cleaned dataset
+combined_data.to_csv("/Users/emmanuel/Downloads/Final Dissertation/combined_seasons_data_prepared.csv", index=False)
+
+print("Data preparation complete.")
+

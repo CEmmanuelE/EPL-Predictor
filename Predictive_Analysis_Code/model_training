@@ -1,0 +1,225 @@
+import pandas as pd
+from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+import time  # To measure training and prediction times
+
+# Load the training data (combined seasons excluding 2023-2024 and upcoming season)
+training_data = pd.read_csv('/Users/emmanuel/Downloads/Final Dissertation/combined_seasons_data_prepared.csv')
+
+# Define features (X) and target variable (y) for training
+X_train = training_data[['HomeTeamForm', 'AwayTeamForm', 'GoalDifference']]
+y_train = training_data['FTR'].map({'H': 1, 'D': 0, 'A': -1})  # Encode target variable
+
+# Load the 2023-2024 season's data as the validation set
+validation_data = pd.read_excel('/Users/emmanuel/Downloads/Final Dissertation/all-euro-data-2023-2024.xlsx', engine='openpyxl')
+
+# ----------------------------------------------
+# Feature Engineering on Validation Data (2023-2024 Season)
+# ----------------------------------------------
+
+# Calculate Goal Difference
+validation_data['GoalDifference'] = validation_data['FTHG'] - validation_data['FTAG']
+
+# Points for Home and Away Team
+validation_data['HomeTeamPoints'] = validation_data.apply(lambda row: 3 if row['FTR'] == 'H' else (1 if row['FTR'] == 'D' else 0), axis=1)
+validation_data['AwayTeamPoints'] = validation_data.apply(lambda row: 3 if row['FTR'] == 'A' else (1 if row['FTR'] == 'D' else 0), axis=1)
+
+# Calculate Rolling Average Form (last 5 matches) for Home and Away Teams
+validation_data['HomeTeamForm'] = validation_data.groupby('HomeTeam')['HomeTeamPoints'].rolling(window=5, min_periods=1).mean().reset_index(0, drop=True)
+validation_data['AwayTeamForm'] = validation_data.groupby('AwayTeam')['AwayTeamPoints'].rolling(window=5, min_periods=1).mean().reset_index(0, drop=True)
+
+# Define features (X_val) and target variable (y_val) for validation
+X_val = validation_data[['HomeTeamForm', 'AwayTeamForm', 'GoalDifference']]
+y_val = validation_data['FTR'].map({'H': 1, 'D': 0, 'A': -1})
+
+# ---------------------------- Initialize Performance Tracking ----------------------------
+
+# Create a dictionary to store the results
+model_performance = {'Model': [], 'Accuracy': [], 'Training Time (s)': [], 'Prediction Time (s)': []}
+
+# ---------------------------- Logistic Regression with K-Fold Cross-Validation ----------------------------
+
+start_time = time.time()
+
+# Initialize Logistic Regression model
+log_reg_model = LogisticRegression()
+
+# Train the Logistic Regression model on the full training set
+log_reg_model.fit(X_train, y_train)
+
+# Measure training time
+log_reg_training_time = time.time() - start_time
+
+# Measure prediction time
+start_time = time.time()
+y_val_pred_log_reg = log_reg_model.predict(X_val)
+log_reg_prediction_time = time.time() - start_time
+
+# Evaluate the Logistic Regression model on the validation set
+log_reg_accuracy = accuracy_score(y_val, y_val_pred_log_reg)
+
+# Store results
+model_performance['Model'].append('Logistic Regression')
+model_performance['Accuracy'].append(log_reg_accuracy)
+model_performance['Training Time (s)'].append(log_reg_training_time)
+model_performance['Prediction Time (s)'].append(log_reg_prediction_time)
+
+# Confusion matrix for Logistic Regression
+conf_matrix_log_reg = confusion_matrix(y_val, y_val_pred_log_reg)
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix_log_reg, annot=True, fmt='d', cmap='Blues', xticklabels=['Away Win', 'Draw', 'Home Win'], yticklabels=['Away Win', 'Draw', 'Home Win'])
+plt.title('Logistic Regression Confusion Matrix (2023-2024)')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.show()
+
+# ---------------------------- Random Forest Fine-Tuning ----------------------------
+start_time = time.time()
+
+# Define the parameter grid for Random Forest
+param_grid_rf = {
+    'n_estimators': [100, 200, 300],
+    'max_depth': [10, 20, 30],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+    'bootstrap': [True, False]
+}
+
+# Initialize Random Forest model
+rf_model = RandomForestClassifier(random_state=42)
+
+# Initialize GridSearchCV for Random Forest
+grid_search_rf = GridSearchCV(estimator=rf_model, param_grid=param_grid_rf, cv=5, verbose=2, n_jobs=-1)
+
+# Fit the GridSearch to the training data
+grid_search_rf.fit(X_train, y_train)
+
+# Get the best parameters for Random Forest
+print(f"Best parameters for Random Forest: {grid_search_rf.best_params_}")
+
+# Use the best model to make predictions on the validation set
+best_rf_model = grid_search_rf.best_estimator_
+
+# Measure training time
+rf_training_time = time.time() - start_time
+
+# Measure prediction time
+start_time = time.time()
+y_val_pred_rf = best_rf_model.predict(X_val)
+rf_prediction_time = time.time() - start_time
+
+# Evaluate the Random Forest model on the validation set
+rf_accuracy = accuracy_score(y_val, y_val_pred_rf)
+
+# Store results
+model_performance['Model'].append('Random Forest')
+model_performance['Accuracy'].append(rf_accuracy)
+model_performance['Training Time (s)'].append(rf_training_time)
+model_performance['Prediction Time (s)'].append(rf_prediction_time)
+
+# Confusion matrix for Random Forest
+conf_matrix_rf = confusion_matrix(y_val, y_val_pred_rf)
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix_rf, annot=True, fmt='d', cmap='Blues', xticklabels=['Away Win', 'Draw', 'Home Win'], yticklabels=['Away Win', 'Draw', 'Home Win'])
+plt.title('Random Forest Confusion Matrix (2023-2024)')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.show()
+
+# ---------------------------- Naive Bayes Fine-Tuning ----------------------------
+start_time = time.time()
+
+# Initialize Naive Bayes model
+nb_model = GaussianNB()
+
+# Train Naive Bayes model
+nb_model.fit(X_train, y_train)
+
+# Measure training time
+nb_training_time = time.time() - start_time
+
+# Measure prediction time
+start_time = time.time()
+y_val_pred_nb = nb_model.predict(X_val)
+nb_prediction_time = time.time() - start_time
+
+# Evaluate the Naive Bayes model on the validation set
+nb_accuracy = accuracy_score(y_val, y_val_pred_nb)
+
+# Store results
+model_performance['Model'].append('Naive Bayes')
+model_performance['Accuracy'].append(nb_accuracy)
+model_performance['Training Time (s)'].append(nb_training_time)
+model_performance['Prediction Time (s)'].append(nb_prediction_time)
+
+# Confusion matrix for Naive Bayes
+conf_matrix_nb = confusion_matrix(y_val, y_val_pred_nb)
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix_nb, annot=True, fmt='d', cmap='Blues', xticklabels=['Away Win', 'Draw', 'Home Win'], yticklabels=['Away Win', 'Draw', 'Home Win'])
+plt.title('Naive Bayes Confusion Matrix (2023-2024)')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.show()
+
+# ---------------------------- Plot Accuracy vs Computational Cost ----------------------------
+
+# Convert the model performance into a DataFrame for easy plotting
+model_performance_df = pd.DataFrame(model_performance)
+
+# Create a scatter plot for Accuracy vs Training Time
+plt.figure(figsize=(10, 6))
+plt.scatter(model_performance_df['Training Time (s)'], model_performance_df['Accuracy'], color='b', label='Training Time', s=100)
+plt.scatter(model_performance_df['Prediction Time (s)'], model_performance_df['Accuracy'], color='r', label='Prediction Time', s=100)
+
+# Annotate the points with model names
+for i, model_name in enumerate(model_performance_df['Model']):
+    plt.text(model_performance_df['Training Time (s)'][i], model_performance_df['Accuracy'][i], model_name)
+
+plt.title('Accuracy vs Computational Cost (Training & Prediction Time)')
+plt.xlabel('Time (seconds)')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# ---------------------------- Predict on the Test Set (2024-2025 Season) ----------------------------
+
+# Load the test data (2024-2025 season)
+test_data = pd.read_excel('/Users/emmanuel/Downloads/Final Dissertation/all-euro-data-2024-2025.xlsx', engine='openpyxl')
+
+# ----------------------------------------------
+# Feature Engineering on Test Data (2024-2025 Season)
+# ----------------------------------------------
+
+# Calculate Goal Difference for the test data
+test_data['GoalDifference'] = test_data['FTHG'] - test_data['FTAG']
+
+# Points for Home and Away Team in the test data
+test_data['HomeTeamPoints'] = test_data.apply(lambda row: 3 if row['FTR'] == 'H' else (1 if row['FTR'] == 'D' else 0), axis=1)
+test_data['AwayTeamPoints'] = test_data.apply(lambda row: 3 if row['FTR'] == 'A' else (1 if row['FTR'] == 'D' else 0), axis=1)
+
+# Calculate Rolling Average Form (last 5 matches) for Home and Away Teams in the test data
+test_data['HomeTeamForm'] = test_data.groupby('HomeTeam')['HomeTeamPoints'].rolling(window=5, min_periods=1).mean().reset_index(0, drop=True)
+test_data['AwayTeamForm'] = test_data.groupby('AwayTeam')['AwayTeamPoints'].rolling(window=5, min_periods=1).mean().reset_index(0, drop=True)
+
+# Define X_test for the predictions
+X_test = test_data[['HomeTeamForm', 'AwayTeamForm', 'GoalDifference']]
+
+# Use the best model (from validation) to make predictions on the test set
+y_test_pred = best_rf_model.predict(X_test)  # Assuming Random Forest performed best
+
+# Create a DataFrame with the human-readable predictions
+predictions_df = pd.DataFrame({
+    'Date': test_data['Date'],
+    'HomeTeam': test_data['HomeTeam'],
+    'AwayTeam': test_data['AwayTeam'],
+    'Predicted_Outcome': pd.Series(y_test_pred).map({1: 'Home Win', 0: 'Draw', -1: 'Away Win'})
+})
+
+# Save the predictions to a CSV file
+predictions_df.to_csv('/Users/emmanuel/Downloads/Final Dissertation/predictions_2024_2025_season.csv', index=False)
